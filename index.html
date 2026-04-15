@@ -506,6 +506,54 @@ window.exportCSV=exportCSV;window.exportEntradasCSV=exportEntradasCSV;
 window.exportXLS=exportXLS;window.exportJSON=exportJSON;
 window.openM=openM;window.closeM=closeM;
 
+// ── MOBILE SIDEBAR ────────────────────────────────────────────
+function toggleSB(){
+  document.querySelector('.sb').classList.toggle('open');
+  document.getElementById('mob-ov').classList.toggle('show');
+}
+function closeSB(){
+  document.querySelector('.sb').classList.remove('open');
+  document.getElementById('mob-ov').classList.remove('show');
+}
+document.querySelectorAll('.ni').forEach(n=>n.addEventListener('click',()=>{
+  if(window.innerWidth<=768)closeSB();
+}));
+
+// ── PDF / PRINT ───────────────────────────────────────────────
+function printDash(id){
+  const now=new Date().toLocaleDateString('es-UY',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+  const sub=id==='dash-v'?getVFilters():getIFilters();
+  const el=document.getElementById(id==='dash-v'?'prhdr-v-sub':'prhdr-i-sub');
+  if(el)el.textContent='Generado: '+now+(sub?' · '+sub:'');
+  setTimeout(()=>window.print(),250);
+}
+function getVFilters(){
+  const p=[];
+  const yr=document.getElementById('fy')?.value;
+  const mn=document.getElementById('fm')?.value;
+  const fd=document.getElementById('fd')?.value;
+  const ft=document.getElementById('ft')?.value;
+  const fp=document.getElementById('fp')?.value;
+  const MN=['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  if(yr)p.push('Año: '+yr);
+  if(mn)p.push('Mes: '+MN[mn]);
+  if(fd||ft)p.push((fd||'—')+' → '+(ft||'hoy'));
+  if(fp)p.push(fp.substring(0,22));
+  return p.join(' | ');
+}
+function getIFilters(){
+  const p=[];
+  const yr=document.getElementById('ify')?.value;
+  const mn=document.getElementById('ifm')?.value;
+  const fp=document.getElementById('ifp')?.value;
+  const MN=['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+  if(yr)p.push('Año: '+yr);
+  if(mn)p.push('Mes: '+MN[mn]);
+  if(fp)p.push(fp.substring(0,22));
+  return p.join(' | ');
+}
+window.toggleSB=toggleSB;window.closeSB=closeSB;window.printDash=printDash;
+
 </script>
 <style>
 :root{--vd:#1B5E20;--vm:#2E7D32;--vl:#4CAF50;--vs:#C8E6C9;--vx:#E8F5E9;
@@ -666,11 +714,79 @@ tr:last-child td{border-bottom:none}
 .ib.am{background:var(--as);border:1px solid var(--am);color:#5a4000}
 .sa{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
 .mo-only{display:none}
+
+/* MOBILE */
+#mob-btn{display:none;position:fixed;top:12px;left:12px;z-index:50;
+  width:42px;height:42px;background:var(--vd);color:white;border:none;
+  border-radius:10px;font-size:20px;align-items:center;justify-content:center;
+  box-shadow:var(--sh2);cursor:pointer}
+#mob-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9}
+@media(max-width:768px){
+  #mob-btn{display:flex}
+  #app{height:100vh;overflow:hidden}
+  .sb{position:fixed;top:0;left:-218px;height:100%;z-index:10;transition:left .28s ease}
+  .sb.open{left:0}
+  #mob-ov.show{display:block}
+  .main{width:100%;overflow-y:auto}
+  .kg{grid-template-columns:1fr 1fr!important;gap:10px}
+  .cg,.cg2{grid-template-columns:1fr!important}
+  .ph{padding:14px 16px 0;flex-wrap:wrap;gap:8px}
+  .pb{padding:12px 16px 20px}
+  .fb{gap:8px;padding:12px 14px}
+  .fb select,.fb input[type=date],.fb input[type=text],.fb input[type=number]{width:100%!important;min-width:0!important}
+  .fg{width:calc(50% - 5px)}
+  .ms-wrap{width:100%}
+  .ms-btn{width:100%}
+  .panel{padding:14px 16px}
+  .kv{font-size:20px}
+  .cc{height:180px}
+  .fg2{grid-template-columns:1fr!important}
+  .fg2 .full{grid-column:1!important}
+  .md{width:96vw;max-height:88vh}
+  table{font-size:11.5px}
+  th,td{padding:6px 9px}
+  .tsc{max-height:340px}
+}
+@media(max-width:480px){
+  .kg{grid-template-columns:1fr!important}
+  .kv{font-size:18px}
+  .cc{height:160px}
+}
+/* PRINT */
+@media print{
+  #ls,#loading,#mob-btn,#mob-ov,.sb,.fb,.fa,
+  .btn,.bx,.bdt,.bed,.blg,.sa,#toast,.mo{display:none!important}
+  #app{display:block!important;height:auto!important;overflow:visible!important}
+  .layout{display:block!important}
+  .main{overflow:visible!important;width:100%!important}
+  .page{display:none!important}
+  .page.active{display:block!important;animation:none!important}
+  body{background:white!important;color:#111}
+  .ph{padding:0 0 10px!important}
+  .pb{padding:0!important}
+  .kc,.cw,.panel{box-shadow:none!important;border:1px solid #ddd!important;break-inside:avoid}
+  .kg{display:grid!important;grid-template-columns:repeat(4,1fr)!important;gap:8px!important;margin-bottom:12px!important}
+  .cg{display:grid!important;grid-template-columns:2fr 1fr!important;gap:8px!important}
+  .cg2{display:grid!important;grid-template-columns:1fr 1fr!important;gap:8px!important}
+  .cc{height:190px!important}
+  .ph h1{color:#1B5E20!important;font-size:15pt}
+  th{background:#1B5E20!important;color:white!important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .kc.g{border-left-color:#1B5E20!important}.kc.t{border-left-color:#00695C!important}
+  .kc.a{border-left-color:#F9A825!important}.kc.r{border-left-color:#C62828!important}.kc.b{border-left-color:#1565C0!important}
+  -webkit-print-color-adjust:exact;print-color-adjust:exact;
+  .print-hdr{display:block!important}
+  @page{margin:1.2cm;size:A4 landscape}
+}
+.print-hdr{display:none;text-align:center;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #1B5E20}
+.print-hdr h2{color:#1B5E20;font-size:15pt;margin-bottom:3px}
+.print-hdr p{color:#555;font-size:10pt}
 </style>
 </head>
 <body>
 
 <!-- LOADING -->
+<button id="mob-btn" onclick="toggleSB()">☰</button>
+<div id="mob-ov" onclick="closeSB()"></div>
 <div id="loading"><div class="spin"></div><div id="loading-msg">Conectando...</div></div>
 
 <!-- LOGIN -->
@@ -722,8 +838,9 @@ tr:last-child td{border-bottom:none}
 
    <div class="page active" id="page-dash-v">
     <div class="ph"><div><h1>Dashboard — Ventas</h1><p>Resumen comercial · La Paz</p></div>
-      <div style="display:flex;gap:8px"><button class="bx" onclick="exportCSV()">⬇ CSV</button><button class="bx" onclick="exportXLS()">⬇ Excel</button></div></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="bx" onclick="exportCSV()">⬇ CSV</button><button class="bx" onclick="exportXLS()">⬇ Excel</button><button class="bx" style="background:var(--vd);color:white;border-color:var(--vd)" onclick="printDash('dash-v')">🖨 PDF</button></div></div>
     <div class="pb">
+      <div class="print-hdr" id="prhdr-v"><h2>♻ La Paz · Dashboard de Ventas</h2><p id="prhdr-v-sub"></p></div>
       <div class="fb">
         <div class="fg"><label>Año</label><select id="fy" onchange="renderDashV()" style="min-width:88px"><option value="">Todos</option><option value="2025">2025</option><option value="2026">2026</option></select></div>
         <div class="fg"><label>Mes</label><select id="fm" onchange="renderDashV()" style="min-width:108px"><option value="">Todos</option><option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option><option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option><option value="7">Julio</option><option value="8">Agosto</option><option value="9">Setiembre</option><option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option></select></div>
@@ -750,8 +867,9 @@ tr:last-child td{border-bottom:none}
    </div>
 
    <div class="page" id="page-dash-i">
-    <div class="ph"><div><h1>Dashboard — Inventario</h1><p>Stock e ingresos · La Paz</p></div><button class="bx" onclick="exportEntradasCSV()">⬇ CSV</button></div>
+    <div class="ph"><div><h1>Dashboard — Inventario</h1><p>Stock e ingresos · La Paz</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="bx" onclick="exportEntradasCSV()">⬇ CSV</button><button class="bx" style="background:var(--vd);color:white;border-color:var(--vd)" onclick="printDash('dash-i')">🖨 PDF</button></div></div>
     <div class="pb">
+      <div class="print-hdr" id="prhdr-i"><h2>♻ La Paz · Dashboard de Inventario</h2><p id="prhdr-i-sub"></p></div>
       <div class="fb">
         <div class="fg"><label>Año</label><select id="ify" onchange="renderDashI()" style="min-width:88px"><option value="">Todos</option><option value="2025">2025</option><option value="2026">2026</option></select></div>
         <div class="fg"><label>Mes</label><select id="ifm" onchange="renderDashI()" style="min-width:108px"><option value="">Todos</option><option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option><option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option><option value="7">Julio</option><option value="8">Agosto</option><option value="9">Setiembre</option><option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option></select></div>
