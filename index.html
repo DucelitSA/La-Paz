@@ -360,24 +360,46 @@ async function ajSave(){
 // ── HISTORIAL VENTAS ───────────────────────────────────────────
 let hvData=[];
 function hvFilter(){
-  const q=document.getElementById('hv-q').value.toLowerCase(),d=document.getElementById('hv-d').value,h=document.getElementById('hv-h').value,p=document.getElementById('hv-p').value;
-  hvData=[...V].filter(v=>{if(p&&v.producto!==p)return false;if(d&&v.fecha<d)return false;if(h&&v.fecha>h)return false;if(q&&!JSON.stringify(v).toLowerCase().includes(q))return false;return true;}).reverse();
-  document.getElementById('hv-cnt').textContent=hvData.length+' registros';
-  document.getElementById('tb-hv').innerHTML=hvData.map((v,i)=>{
-  const iva=v.iva||0;
-  const conIva=v.total||(v.importe+(v.iva||0));
-  return `<tr>
-    <td>${v.fecha}</td><td>${v.factura||'—'}</td>
-    <td><strong>${v.producto}</strong></td><td>${v.cliente||'—'}</td>
-    <td style="text-align:right">${v.cantidad}</td>
-    <td style="text-align:right;font-weight:600;color:var(--vd)">${$f(v.importe)}</td>
-    <td style="text-align:right;color:${iva>0?'var(--am)':'var(--gt)'}">${iva>0?$f(iva):'—'}</td>
-    <td style="text-align:right;font-weight:600;color:var(--bl)">${$f(conIva)}</td>
-    <td>${(v.medio||'').substring(0,12)}</td>
-    <td style="display:flex;gap:5px">${SESSION?.rol==='master'?`<button class="bed" onclick="window._openEV(${i})">✏️</button><button class="bdt" onclick="window._delV(${i})">🗑</button>`:''}</td>
-  </tr>`;
-}).join('');
+  const q    = document.getElementById('hv-q').value.toLowerCase();
+  const d    = document.getElementById('hv-d').value;
+  const h    = document.getElementById('hv-h').value;
+  const p    = document.getElementById('hv-p').value;
+  const sort = document.getElementById('hv-sort')?.value || 'desc';
+
+  hvData = [...V].filter(v=>{
+    if(p && v.producto !== p) return false;
+    if(d && v.fecha < d)     return false;
+    if(h && v.fecha > h)     return false;
+    if(q && !JSON.stringify(v).toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  // Sort by date
+  hvData.sort((a,b) => sort === 'asc'
+    ? a.fecha.localeCompare(b.fecha)
+    : b.fecha.localeCompare(a.fecha));
+
+  document.getElementById('hv-cnt').textContent = hvData.length + ' registros';
+  document.getElementById('tb-hv').innerHTML = hvData.map((v,i) => {
+    const iva    = v.iva || 0;
+    const sinIva = v.importe || 0;
+    const conIva = v.total || (sinIva + iva);
+    return `<tr>
+      <td>${v.fecha}</td>
+      <td style="font-family:monospace;font-size:11px">${v.factura||'—'}</td>
+      <td><strong>${v.producto}</strong></td>
+      <td>${v.cliente||'SIN CLIENTE'}</td>
+      <td style="text-align:right">${v.cantidad}</td>
+      <td style="text-align:right;font-weight:600;color:var(--vd)">${$f(sinIva)}</td>
+      <td style="text-align:right;color:${iva>0?'var(--am)':'var(--gt)'}">${iva>0?$f(iva):'—'}</td>
+      <td style="text-align:right;font-weight:600;color:var(--bl)">${$f(conIva)}</td>
+      <td><span class="bdg bg2">${(v.medio||'').substring(0,14)}</span></td>
+      <td style="font-size:11px;color:var(--gt)">${v.nro_transaccion||'—'}</td>
+      <td style="display:flex;gap:5px">${SESSION?.rol==='master'?`<button class="bed" onclick="window._openEV(${i})">✏️</button><button class="bdt" onclick="window._delV(${i})">🗑</button>`:''}</td>
+    </tr>`;
+  }).join('');
 }
+
 function hvReset(){['hv-q','hv-d','hv-h'].forEach(id=>document.getElementById(id).value='');document.getElementById('hv-p').value='';hvFilter();}
 window._openEV=function(di){const v=hvData[di];document.getElementById('ev-idx').value=di;document.getElementById('ev-f').value=v.fecha||'';document.getElementById('ev-fac').value=v.factura||'';document.getElementById('ev-prod').value=v.producto||'';const up=v.cantidad?(v.importe/v.cantidad):v.importe;document.getElementById('ev-precio').value=up.toFixed(2);document.getElementById('ev-total').value=(v.total||v.importe||0).toFixed(2);document.getElementById('ev-cli').value=v.cliente||'';document.getElementById('ev-iva').value=v.iva||0;document.getElementById('ev-obs').value=v.obs||'';const evnrotx=document.getElementById('ev-nrotx');if(evnrotx)evnrotx.value=v.nro_transaccion||'';const ms=document.getElementById('ev-med');const mv=(v.medio||'').trim().toLowerCase();let ok=false;for(let o of ms.options){if(o.value.toLowerCase()===mv){ms.value=o.value;ok=true;break;}}if(!ok)ms.value='Transferencia';openM('m-ev');}
 function evCalc(){const c=parseFloat(document.getElementById('ev-cant').value)||0,p=parseFloat(document.getElementById('ev-precio').value)||0;document.getElementById('ev-total').value=(c*p).toFixed(2);}
@@ -403,72 +425,87 @@ let nvLineId = 0;
 
 function nvAddLine(prefill){
   nvLineId++;
-  const id = nvLineId;
-  const opts = S.filter(s=>s.codigo).map(s=>`<option value="${s.codigo}">${s.descripcion}</option>`).join('');
+  const id  = nvLineId;
+  const opts = S.filter(s=>s.codigo)
+    .map(s=>`<option value="${s.codigo}">${s.descripcion}</option>`)
+    .join('');
   const div = document.createElement('div');
   div.className = 'line-item';
   div.id = `nvl-${id}`;
-  div.innerHTML = `
-    <select onchange="nvLinePrice(${id})" style="grid-column:1">
-      <option value="">— Producto —</option>${opts}
-    </select>
-    <input type="number" placeholder="Cant." min="1" oninput="nvRecalc()" title="Cantidad">
-    <input type="number" placeholder="Precio $" min="0" oninput="nvRecalc()" title="Precio unitario">
-    <label class="line-iva" title="Aplica IVA 12%">
-      <input type="checkbox" onchange="nvRecalc()"> IVA 12%
-    </label>
-    <button class="line-del" onclick="nvRemoveLine(${id})" title="Eliminar">×</button>
-  `;
+  div.dataset.lineId = id;
+  div.innerHTML =
+    `<select class="nv-sel"><option value="">— Producto —</option>${opts}</select>` +
+    `<input class="nv-cant" type="number" placeholder="Cant." min="1">` +
+    `<input class="nv-precio" type="number" placeholder="Precio $" min="0">` +
+    `<label class="line-iva"><input class="nv-ivachk" type="checkbox"> IVA 12%</label>` +
+    `<button class="line-del" data-del="${id}">×</button>`;
   document.getElementById('nv-lines').appendChild(div);
+
   if(prefill){
-    const els = div.querySelectorAll('select,input[type=number]');
-    if(prefill.cod) div.querySelector('select').value = prefill.cod;
-    if(prefill.cant) els[0].value = prefill.cant;
-    if(prefill.precio) els[1].value = prefill.precio;
-    if(prefill.iva) div.querySelector('input[type=checkbox]').checked = true;
+    if(prefill.cod)    div.querySelector('.nv-sel').value    = prefill.cod;
+    if(prefill.cant)   div.querySelector('.nv-cant').value   = prefill.cant;
+    if(prefill.precio) div.querySelector('.nv-precio').value = prefill.precio;
+    if(prefill.iva)    div.querySelector('.nv-ivachk').checked = true;
   }
   nvRecalc();
 }
 
-function nvLinePrice(id){
-  const div = document.getElementById(`nvl-${id}`);
-  const cod = div.querySelector('select').value;
-  const s = S.find(x=>x.codigo===cod);
-  if(s&&s.costo){
-    const inputs = div.querySelectorAll('input[type=number]');
-    inputs[1].value = s.costo;
+// Event delegation for nv-lines
+document.getElementById('nv-lines') && document.getElementById('nv-lines').addEventListener('input', nvRecalc);
+document.addEventListener('click', function(e){
+  // nv delete button
+  if(e.target.dataset && e.target.dataset.del && e.target.closest('#nv-lines')){
+    const id = e.target.dataset.del;
+    const el = document.getElementById('nvl-'+id);
+    if(el){ el.remove(); nvRecalc(); }
+    if(!document.querySelectorAll('#nv-lines .line-item').length) nvAddLine();
   }
+  // ni delete button
+  if(e.target.dataset && e.target.dataset.nidel && e.target.closest('#ni-lines')){
+    const id = e.target.dataset.nidel;
+    const el = document.getElementById('nil-'+id);
+    if(el){ el.remove(); niRecalc(); }
+    if(!document.querySelectorAll('#ni-lines .ni-line').length) niAddLine();
+  }
+});
+
+function nvLinePrice(sel){
+  const div = sel.closest('.line-item');
+  if(!div) return;
+  const cod = sel.value;
+  const s   = S.find(x=>x.codigo===cod);
+  if(s && s.costo) div.querySelector('.nv-precio').value = s.costo;
   nvRecalc();
 }
 
 function nvRemoveLine(id){
-  const el = document.getElementById(`nvl-${id}`);
-  if(el) el.remove();
-  nvRecalc();
-  // Keep at least one line
+  const el = document.getElementById('nvl-'+id);
+  if(el){ el.remove(); nvRecalc(); }
   if(!document.querySelectorAll('#nv-lines .line-item').length) nvAddLine();
 }
 
 function nvRecalc(){
   let base=0, ivaTotal=0;
   document.querySelectorAll('#nv-lines .line-item').forEach(div=>{
-    const sel = div.querySelector('select').value;
-    const inputs = div.querySelectorAll('input[type=number]');
-    const cant = parseFloat(inputs[0].value)||0;
-    const precio = parseFloat(inputs[1].value)||0;
-    const ivaChk = div.querySelector('input[type=checkbox]').checked;
+    const cant   = parseFloat(div.querySelector('.nv-cant')?.value)||0;
+    const precio = parseFloat(div.querySelector('.nv-precio')?.value)||0;
+    const ivaChk = div.querySelector('.nv-ivachk')?.checked;
     const lineBase = cant * precio;
-    const lineIva = ivaChk ? lineBase * 0.12 : 0;
-    base += lineBase;
-    ivaTotal += lineIva;
+    base     += lineBase;
+    ivaTotal += ivaChk ? lineBase * 0.12 : 0;
   });
   const total = base + ivaTotal;
-  document.getElementById('nv-sum-base').textContent  = '$' + Math.round(base).toLocaleString('es-UY');
-  document.getElementById('nv-sum-iva').textContent   = '$' + Math.round(ivaTotal).toLocaleString('es-UY');
-  document.getElementById('nv-sum-total').textContent = '$' + Math.round(total).toLocaleString('es-UY');
+  const el_b = document.getElementById('nv-sum-base');
+  const el_i = document.getElementById('nv-sum-iva');
+  const el_t = document.getElementById('nv-sum-total');
+  if(el_b) el_b.textContent = '$' + Math.round(base).toLocaleString('es-UY');
+  if(el_i) el_i.textContent = '$' + Math.round(ivaTotal).toLocaleString('es-UY');
+  if(el_t) el_t.textContent = '$' + Math.round(total).toLocaleString('es-UY');
 }
 
 function nvCalc(){ nvRecalc(); }
+function nvPrice(){}
+
 function nvPrice(){}
 
 function nvClear(){
@@ -493,11 +530,10 @@ async function nvSave(){
   const lines = [];
   let hasProduct = false;
   document.querySelectorAll('#nv-lines .line-item').forEach(div=>{
-    const cod = div.querySelector('select').value;
-    const inputs = div.querySelectorAll('input[type=number]');
-    const cant = parseFloat(inputs[0].value)||0;
-    const precio = parseFloat(inputs[1].value)||0;
-    const ivaChk = div.querySelector('input[type=checkbox]').checked;
+    const cod    = div.querySelector('.nv-sel')?.value;
+    const cant   = parseFloat(div.querySelector('.nv-cant')?.value)||0;
+    const precio = parseFloat(div.querySelector('.nv-precio')?.value)||0;
+    const ivaChk = div.querySelector('.nv-ivachk')?.checked;
     if(cod && cant && precio){
       hasProduct = true;
       const prod = S.find(s=>s.codigo===cod);
@@ -559,47 +595,39 @@ let niLineId = 0;
 
 function niAddLine(){
   niLineId++;
-  const id = niLineId;
-  const opts = S.filter(s=>s.codigo).map(s=>`<option value="${s.codigo}">${s.descripcion}</option>`).join('');
+  const id   = niLineId;
+  const opts = S.filter(s=>s.codigo)
+    .map(s=>`<option value="${s.codigo}">${s.descripcion}</option>`)
+    .join('');
   const div = document.createElement('div');
   div.className = 'ni-line';
   div.id = `nil-${id}`;
-  div.innerHTML = `
-    <select style="grid-column:1">
-      <option value="">— Producto —</option>${opts}
-    </select>
-    <input type="number" placeholder="Cantidad" min="1" oninput="niRecalc()" title="Cantidad">
-    <input type="number" placeholder="Costo $" min="0" title="Costo unitario">
-    <button class="line-del" onclick="niRemoveLine(${id})" title="Eliminar">×</button>
-  `;
+  div.dataset.lineId = id;
+  div.innerHTML =
+    `<select class="ni-sel"><option value="">— Producto —</option>${opts}</select>` +
+    `<input class="ni-cant" type="number" placeholder="Cantidad" min="1">` +
+    `<input class="ni-costo" type="number" placeholder="Costo $" min="0">` +
+    `<button class="line-del" data-nidel="${id}">×</button>`;
   document.getElementById('ni-lines').appendChild(div);
+  div.querySelector('.ni-cant').addEventListener('input', niRecalc);
   niRecalc();
 }
 
 function niRemoveLine(id){
-  const el = document.getElementById(`nil-${id}`);
-  if(el) el.remove();
-  niRecalc();
+  const el = document.getElementById('nil-'+id);
+  if(el){ el.remove(); niRecalc(); }
   if(!document.querySelectorAll('#ni-lines .ni-line').length) niAddLine();
 }
 
 function niRecalc(){
   let total = 0;
   document.querySelectorAll('#ni-lines .ni-line').forEach(div=>{
-    const inputs = div.querySelectorAll('input[type=number]');
-    total += parseFloat(inputs[0].value)||0;
+    total += parseFloat(div.querySelector('.ni-cant')?.value)||0;
   });
   const el = document.getElementById('ni-sum-uds');
   if(el) el.textContent = Math.round(total).toLocaleString('es-UY');
 }
 
-function niClear(){
-  document.getElementById('ni-lines').innerHTML = '';
-  ['ni-rem','ni-mat','ni-ubic','ni-obs'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
-  document.getElementById('ni-f').value = today();
-  const el = document.getElementById('ni-sum-uds'); if(el) el.textContent='0';
-  niAddLine();
-}
 
 async function niSave(){
   const fecha = document.getElementById('ni-f').value;
@@ -611,10 +639,9 @@ async function niSave(){
 
   const lines = [];
   document.querySelectorAll('#ni-lines .ni-line').forEach(div=>{
-    const cod = div.querySelector('select').value;
-    const inputs = div.querySelectorAll('input[type=number]');
-    const cant  = parseFloat(inputs[0].value)||0;
-    const costo = parseFloat(inputs[1].value)||0;
+    const cod   = div.querySelector('.ni-sel')?.value;
+    const cant  = parseFloat(div.querySelector('.ni-cant')?.value)||0;
+    const costo = parseFloat(div.querySelector('.ni-costo')?.value)||0;
     if(cod && cant) lines.push({cod, cant, costo});
   });
 
