@@ -225,6 +225,8 @@ function getFV(){
   const allCks=[...document.querySelectorAll('#ms-cli-list .ms-ck')];
   const chkClis=allCks.filter(c=>c.checked).map(c=>c.value);
   const allChk=allCks.length===0||chkClis.length===allCks.length;
+  const med=document.getElementById('fmed')?.value||'';
+  const ivaView=document.querySelector('input[name="iva-view"]:checked')?.value||'sin';
   return V.filter(v=>{
     const d=new Date((v.fecha||'')+'T12:00:00');
     if(yr&&d.getFullYear()!=yr)return false;
@@ -233,6 +235,7 @@ function getFV(){
     if(fd&&v.fecha<fd)return false;
     if(ft&&v.fecha>ft)return false;
     if(fp&&v.producto!==fp)return false;
+    if(med&&v.medio&&!v.medio.toLowerCase().includes(med.toLowerCase()))return false;
     if(!allChk&&v.cliente&&!chkClis.includes(v.cliente))return false;
     return true;
   });
@@ -254,13 +257,21 @@ function getFE(){
     return true;
   });
 }
-function resetDashV(){['fy','fm','fw','fd','ft','fp'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});msAll('ms-cli');renderDashV();}
+function resetDashV(){
+  ['fy','fm','fw','fd','ft','fp','fmed'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});
+  const sinRad=document.querySelector('input[name="iva-view"][value="sin"]');if(sinRad)sinRad.checked=true;
+  msAll('ms-cli');renderDashV();
+}
 function resetDashI(){['ify','ifm','ifw','ifd1','ifd2','ift2','ifp'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});renderDashI();}
 
 // ── DASHBOARD VENTAS ───────────────────────────────────────────
 function renderDashV(){
   const data=getFV();
-  const fact=data.reduce((s,v)=>s+(v.importe||0),0);
+  const ivaView=document.querySelector('input[name="iva-view"]:checked')?.value||'sin';
+  const factSinIVA=data.reduce((s,v)=>s+(v.importe||0),0);
+  const factConIVA=data.reduce((s,v)=>s+(v.total||(v.importe+(v.iva||0))),0);
+  const totalIVA=data.reduce((s,v)=>s+(v.iva||0),0);
+  const fact=ivaView==='con'?factConIVA:factSinIVA;
   const tx=data.length,uds=data.reduce((s,v)=>s+(v.cantidad||0),0);
   const clis=new Set(data.map(v=>v.cliente).filter(Boolean));
   document.getElementById('kf').textContent=$f(fact);
@@ -270,6 +281,8 @@ function renderDashV(){
   document.getElementById('kfs').textContent=clis.size+' clientes';
   document.getElementById('kts').textContent=clis.size+' clientes únicos';
   document.getElementById('kus').textContent=[...new Set(data.map(v=>v.producto))].length+' productos';
+  const badge=document.getElementById('kpi-iva-badge');
+  if(badge)badge.textContent=ivaView==='con'?'IVA incluido ($'+Math.round(totalIVA).toLocaleString('es-UY')+')':'Sin IVA';
   const mon={},ml={};data.forEach(v=>{if(!v.fecha)return;const d=new Date(v.fecha+'T12:00:00');const k=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');mon[k]=(mon[k]||0)+(v.importe||0);ml[k]=d.toLocaleDateString('es',{month:'short',year:'2-digit'});});
   const mks=Object.keys(mon).sort();
   dChart('ch-ev');if(mks.length){new Chart(document.getElementById('ch-ev'),{type:'line',data:{labels:mks.map(k=>ml[k]),datasets:[{label:'Facturación',data:mks.map(k=>mon[k]),borderColor:'#2E7D32',backgroundColor:'rgba(46,125,50,.08)',borderWidth:2.5,fill:true,tension:.4,pointBackgroundColor:'#1B5E20',pointRadius:4}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>'$'+Math.round(c.raw).toLocaleString('es-UY')}}},scales:{y:{ticks:{callback:v=>'$'+Math.round(v/1000)+'k',font:{size:10}},grid:{color:'#f0f0f0'}},x:{ticks:{font:{size:10}},grid:{display:false}}}}});}
@@ -306,7 +319,11 @@ function renderDashI(){
 }
 
 // ── STOCK ──────────────────────────────────────────────────────
-function calcSt(s){return(s.stock||0)+(s.ajuste||0);}
+function calcSt(s){
+  // If ajuste is 0 (reset by recuento), stock field is ground truth
+  // Otherwise add ajuste for incremental adjustments
+  return(s.stock||0)+(s.ajuste||0);
+}
 function renderStock(){
   const negs=S.filter(s=>calcSt(s)<0);
   document.getElementById('st-alert').innerHTML=negs.length?`<div class="ib rd">⚠️ <strong>${negs.length} producto(s) con stock negativo</strong> — ${negs.map(s=>s.descripcion.substring(0,20)).join(', ')}.</div>`:'<div class="ib gr">✅ Todo el stock está en niveles positivos.</div>';
@@ -325,7 +342,10 @@ async function ajSave(){
   if(!cod||isNaN(real)){toast('Seleccioná producto e ingresá el stock real','err');return;}
   const si=S.findIndex(s=>s.codigo===cod);if(si<0)return;
   const sys=calcSt(S[si]),diff=real-sys;
-  S[si].ajuste=(S[si].ajuste||0)+diff;S[si].stock=real;
+  // Override completely — stock real manda sobre el sistema
+  S[si].stock=real;
+  S[si].ajuste=0;  // reset ajuste since stock is now the ground truth
+  S[si].ingresado=real+(Math.abs(S[si].vendido||0)); // recalc ingresado to match
   showLoading('Guardando ajuste...');
   await fsUpdate('stock',cod,{ajuste:S[si].ajuste,stock:real});
   if(diff>0){const ne={fecha:document.getElementById('aj-f').value||today(),remito:'AJUSTE',matricula:'',producto:S[si].descripcion,cantidad:diff,ubicacion:'',obs:'[AJUSTE RECUENTO] '+document.getElementById('aj-obs').value,_ajuste:true};const nid=await fsAdd('entradas',ne);E.push({_id:nid,...ne});}
@@ -339,7 +359,20 @@ function hvFilter(){
   const q=document.getElementById('hv-q').value.toLowerCase(),d=document.getElementById('hv-d').value,h=document.getElementById('hv-h').value,p=document.getElementById('hv-p').value;
   hvData=[...V].filter(v=>{if(p&&v.producto!==p)return false;if(d&&v.fecha<d)return false;if(h&&v.fecha>h)return false;if(q&&!JSON.stringify(v).toLowerCase().includes(q))return false;return true;}).reverse();
   document.getElementById('hv-cnt').textContent=hvData.length+' registros';
-  document.getElementById('tb-hv').innerHTML=hvData.map((v,i)=>`<tr><td>${v.fecha}</td><td>${v.factura||'—'}</td><td><strong>${v.producto}</strong></td><td>${v.cliente||'—'}</td><td style="text-align:right">${v.cantidad}</td><td style="text-align:right;font-weight:600;color:var(--vd)">${$f(v.importe)}</td><td style="text-align:right">${$f(v.total||v.importe)}</td><td>${(v.medio||'').substring(0,12)}</td><td style="display:flex;gap:5px">${SESSION?.rol==='master'?`<button class="bed" onclick="window._openEV(${i})">✏️</button><button class="bdt" onclick="window._delV(${i})">🗑</button>`:''}</td></tr>`).join('');
+  document.getElementById('tb-hv').innerHTML=hvData.map((v,i)=>{
+  const iva=v.iva||0;
+  const conIva=v.total||(v.importe+(v.iva||0));
+  return `<tr>
+    <td>${v.fecha}</td><td>${v.factura||'—'}</td>
+    <td><strong>${v.producto}</strong></td><td>${v.cliente||'—'}</td>
+    <td style="text-align:right">${v.cantidad}</td>
+    <td style="text-align:right;font-weight:600;color:var(--vd)">${$f(v.importe)}</td>
+    <td style="text-align:right;color:${iva>0?'var(--am)':'var(--gt)'}">${iva>0?$f(iva):'—'}</td>
+    <td style="text-align:right;font-weight:600;color:var(--bl)">${$f(conIva)}</td>
+    <td>${(v.medio||'').substring(0,12)}</td>
+    <td style="display:flex;gap:5px">${SESSION?.rol==='master'?`<button class="bed" onclick="window._openEV(${i})">✏️</button><button class="bdt" onclick="window._delV(${i})">🗑</button>`:''}</td>
+  </tr>`;
+}).join('');
 }
 function hvReset(){['hv-q','hv-d','hv-h'].forEach(id=>document.getElementById(id).value='');document.getElementById('hv-p').value='';hvFilter();}
 window._openEV=function(di){const v=hvData[di];document.getElementById('ev-idx').value=di;document.getElementById('ev-f').value=v.fecha||'';document.getElementById('ev-fac').value=v.factura||'';document.getElementById('ev-prod').value=v.producto||'';const up=v.cantidad?(v.importe/v.cantidad):v.importe;document.getElementById('ev-precio').value=up.toFixed(2);document.getElementById('ev-total').value=(v.total||v.importe||0).toFixed(2);document.getElementById('ev-cli').value=v.cliente||'';document.getElementById('ev-iva').value=v.iva||0;document.getElementById('ev-obs').value=v.obs||'';const ms=document.getElementById('ev-med');const mv=(v.medio||'').trim().toLowerCase();let ok=false;for(let o of ms.options){if(o.value.toLowerCase()===mv){ms.value=o.value;ok=true;break;}}if(!ok)ms.value='Transferencia';openM('m-ev');}
@@ -359,13 +392,31 @@ window._delV=async function(di){if(!confirm('¿Eliminar esta venta?'))return;con
 
 // ── NUEVA VENTA ────────────────────────────────────────────────
 function nvPrice(){const cod=document.getElementById('nv-prod').value;const s=S.find(x=>x.codigo===cod);if(s&&s.costo){document.getElementById('nv-precio').value=s.costo;nvCalc();}}
-function nvCalc(){const c=parseFloat(document.getElementById('nv-cant').value)||0,p=parseFloat(document.getElementById('nv-precio').value)||0;document.getElementById('nv-total').value=(c*p).toFixed(2);}
-function nvClear(){['nv-fac','nv-cant','nv-precio','nv-total','nv-cli','nv-obs'].forEach(id=>document.getElementById(id).value='');document.getElementById('nv-prod').value='';document.getElementById('nv-iva').value='0';document.getElementById('nv-f').value=today();}
+function nvCalc(){
+  const c=parseFloat(document.getElementById('nv-cant').value)||0;
+  const p=parseFloat(document.getElementById('nv-precio').value)||0;
+  const base=c*p;
+  const ivaChk=document.getElementById('nv-iva-chk')?.checked;
+  const iva=ivaChk?parseFloat((base*0.12).toFixed(2)):0;
+  document.getElementById('nv-total').value=base.toFixed(2);
+  document.getElementById('nv-iva').value=iva.toFixed(2);
+  document.getElementById('nv-total-iva').value=(base+iva).toFixed(2);
+}
+function nvClear(){
+  ['nv-fac','nv-cant','nv-precio','nv-total','nv-total-iva','nv-cli','nv-obs'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('nv-prod').value='';
+  document.getElementById('nv-iva').value='0';
+  const chk=document.getElementById('nv-iva-chk');if(chk)chk.checked=false;
+  document.getElementById('nv-f').value=today();
+}
 async function nvSave(){
   const fecha=document.getElementById('nv-f').value,cod=document.getElementById('nv-prod').value,cant=parseFloat(document.getElementById('nv-cant').value),precio=parseFloat(document.getElementById('nv-precio').value);
   if(!fecha||!cod||!cant||!precio){toast('Completá campos obligatorios (*)','err');return;}
   const prod=S.find(s=>s.codigo===cod);
-  const nv={fecha,factura:document.getElementById('nv-fac').value.trim()||'V-'+Date.now().toString().slice(-6),cod_prod:cod,producto:prod?.descripcion||cod,cantidad:cant,cliente:document.getElementById('nv-cli').value.trim(),medio:document.getElementById('nv-med').value,importe:parseFloat((cant*precio).toFixed(2)),total:parseFloat(document.getElementById('nv-total').value)||cant*precio,iva:parseFloat(document.getElementById('nv-iva').value)||0,obs:document.getElementById('nv-obs').value.trim(),registradoPor:SESSION.email};
+  const base=parseFloat((cant*precio).toFixed(2));
+  const ivaChk=document.getElementById('nv-iva-chk')?.checked;
+  const ivaAmt=ivaChk?parseFloat((base*0.12).toFixed(2)):0;
+  const nv={fecha,factura:document.getElementById('nv-fac').value.trim()||'V-'+Date.now().toString().slice(-6),cod_prod:cod,producto:prod?.descripcion||cod,cantidad:cant,cliente:document.getElementById('nv-cli').value.trim(),medio:document.getElementById('nv-med').value,importe:base,iva:ivaAmt,iva_aplica:ivaChk||false,total:base+ivaAmt,obs:document.getElementById('nv-obs').value.trim(),registradoPor:SESSION.email};
   showLoading('Guardando venta...');
   const nid=await fsAdd('ventas',nv);V.push({_id:nid,...nv});
   // update stock
@@ -411,10 +462,19 @@ async function niSave(){
 }
 
 // ── RANKING ────────────────────────────────────────────────────
+function rkReset(){['rk-d','rk-h'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});document.getElementById('rk-ord').value='importe';renderRanking();}
 function renderRanking(){
-  const bp={};V.forEach(v=>{if(!bp[v.producto])bp[v.producto]={uds:0,imp:0,tx:0};bp[v.producto].uds+=v.cantidad||0;bp[v.producto].imp+=v.importe||0;bp[v.producto].tx+=1;});
+  const rkD=document.getElementById('rk-d')?.value||'';
+  const rkH=document.getElementById('rk-h')?.value||'';
+  const rkOrd=document.getElementById('rk-ord')?.value||'importe';
+  const filtV=V.filter(v=>{
+    if(rkD&&v.fecha<rkD)return false;
+    if(rkH&&v.fecha>rkH)return false;
+    return true;
+  });
+  const bp={};filtV.forEach(v=>{if(!bp[v.producto])bp[v.producto]={uds:0,imp:0,tx:0};bp[v.producto].uds+=v.cantidad||0;bp[v.producto].imp+=v.importe||0;bp[v.producto].tx+=1;});
   const total=Object.values(bp).reduce((s,x)=>s+x.imp,0);
-  const ranked=Object.entries(bp).sort((a,b)=>b[1].imp-a[1].imp);
+  const ranked=Object.entries(bp).sort((a,b)=>b[1][rkOrd==='cantidad'?'uds':rkOrd==='tx'?'tx':'imp']-a[1][rkOrd==='cantidad'?'uds':rkOrd==='tx'?'tx':'imp']);
   const n=ranked.length,nT=Math.max(3,Math.round(n*.3)),nL=Math.max(3,Math.round(n*.25)),maxI=ranked[0]?.[1].imp||1;
   const cat=i=>i<nT?'⭐ TOP':i>=n-nL?'⚠️ BAJO':'✅ REGULAR';
   const catB=i=>i<nT?'bt':i>=n-nL?'bl2':'bm';
@@ -426,7 +486,9 @@ function renderRanking(){
 // ── PRODUCTOS ──────────────────────────────────────────────────
 function renderProds(){
   const sm={};V.forEach(v=>sm[v.producto]=(sm[v.producto]||0)+(v.importe||0));
-  document.getElementById('tb-pr').innerHTML=S.filter(s=>s.codigo).map((s,i)=>`<tr><td><code style="font-size:11px;background:var(--gg);padding:2px 6px;border-radius:4px">${s.codigo}</code></td><td><strong>${s.descripcion}</strong></td><td><span class="bdg bn">${s.material}</span></td><td style="text-align:right">${s.costo?$f(s.costo):'—'}</td><td style="text-align:right;font-weight:700" class="${calcSt(s)<0?'sneg':''}">${Math.round(calcSt(s))}</td><td style="text-align:right;font-weight:600;color:var(--vd)">${sm[s.descripcion]?$f(sm[s.descripcion]):'—'}</td><td>${SESSION?.rol==='master'?`<button class="bed" onclick="window._openProd(${i})">✏️</button>`:''}</td></tr>`).join('');
+  document.getElementById('tb-pr').innerHTML=S.filter(s=>s.codigo).map((s,i)=>`<tr><td><code style="font-size:11px;background:var(--gg);padding:2px 6px;border-radius:4px">${s.codigo}</code></td><td><strong>${s.descripcion}</strong></td><td><span class="bdg bn">${s.material}</span></td><td style="text-align:right">${s.costo?$f(s.costo):'—'}</td><td style="text-align:right;font-weight:700" class="${calcSt(s)<0?'sneg':''}">${Math.round(calcSt(s))}</td><td style="text-align:right;font-weight:600;color:var(--vd)">${sm[s.descripcion]?$f(sm[s.descripcion]):'—'}</td><td style="display:flex;gap:5px">
+    ${SESSION?.rol==='master'?`<button class="bed" onclick="window._openProd(${i})">✏️ Editar</button>`:''} 
+  </td></tr>`).join('');
 }
 let _pi=null;
 window._openProd=function(idx){_pi=idx;document.getElementById('mp-ttl').textContent='Editar Producto';const s=S.filter(x=>x.codigo)[idx];document.getElementById('mp-cod').value=s.codigo;document.getElementById('mp-desc').value=s.descripcion;document.getElementById('mp-mat').value=s.material;document.getElementById('mp-costo').value=s.costo||'';document.getElementById('mp-stock').value=s.stock||0;openM('m-prod');}
@@ -437,7 +499,8 @@ async function mpSave(){
   const obj={codigo:cod,descripcion:desc,material:document.getElementById('mp-mat').value,costo:parseFloat(document.getElementById('mp-costo').value)||0,stock:parseFloat(document.getElementById('mp-stock').value)||0,ingresado:parseFloat(document.getElementById('mp-stock').value)||0,vendido:0};
   showLoading('Guardando...');
   await fsSet('stock',cod,obj);
-  if(_pi!=null){const ri=S.findIndex(s=>s.codigo===S.filter(x=>x.codigo)[_pi].codigo);S[ri]={...S[ri],...obj};}else{if(S.find(s=>s.codigo===cod)){toast('Código ya existe','err');hideLoading();return;}S.push(obj);}
+  if(_pi!=null){const ri=S.findIndex(s=>s.codigo===S.filter(x=>x.codigo)[_pi].codigo);S[ri]={...S[ri],...obj};}
+  else{if(S.find(s=>s.codigo===cod)){toast('Código ya existe','err');hideLoading();return;}S.push(obj);}
   hideLoading();renderProds();renderStock();initSelects();closeM('m-prod');toast(_pi!=null?'Producto actualizado':'Producto creado');
 }
 
@@ -552,7 +615,7 @@ function getIFilters(){
   if(fp)p.push(fp.substring(0,22));
   return p.join(' | ');
 }
-window.toggleSB=toggleSB;window.closeSB=closeSB;window.printDash=printDash;
+window.toggleSB=toggleSB;window.closeSB=closeSB;window.printDash=printDash;window.rkReset=rkReset;
 
 </script>
 <style>
@@ -854,11 +917,32 @@ tr:last-child td{border-bottom:none}
           </div></div>
         <button class="br" onclick="resetDashV()">✕ Limpiar</button>
       </div>
+      <div class="fb" style="margin-top:-10px;margin-bottom:10px">
+        <div class="fg"><label>Medio de Pago</label>
+          <select id="fmed" onchange="renderDashV()" style="min-width:140px">
+            <option value="">Todos</option>
+            <option>Transferencia</option><option>Efectivo</option><option>Depósito</option>
+            <option>Crédito 15 días</option><option>Pendiente</option><option>POS</option><option>Debe</option><option>Otro</option>
+          </select></div>
+      </div>
       <div class="kg">
         <div class="kc g"><div class="kl">Facturación</div><div class="kv" id="kf">$0</div><div class="ks" id="kfs">—</div></div>
         <div class="kc t"><div class="kl">Transacciones</div><div class="kv" id="kt">0</div><div class="ks" id="kts">—</div></div>
         <div class="kc a"><div class="kl">Ticket Promedio</div><div class="kv" id="kp">$0</div><div class="ks">Por transacción</div></div>
         <div class="kc"><div class="kl">Unidades</div><div class="kv" id="ku">0</div><div class="ks" id="kus">—</div></div>
+      </div>
+      <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <div style="background:white;border-radius:var(--rl);box-shadow:var(--sh1);padding:12px 18px;
+          display:flex;align-items:center;gap:10px;flex:1;min-width:200px">
+          <span style="font-size:13px;font-weight:600;color:var(--go)">Ver totales:</span>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+            <input type="radio" name="iva-view" value="sin" checked onchange="renderDashV()" style="accent-color:var(--vd)"> Sin IVA
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+            <input type="radio" name="iva-view" value="con" onchange="renderDashV()" style="accent-color:var(--vd)"> Con IVA
+          </label>
+          <span id="kpi-iva-badge" style="font-size:11px;background:var(--bs);color:var(--bl);padding:2px 8px;border-radius:10px;font-weight:600"></span>
+        </div>
       </div>
       <div class="cg"><div class="cw"><div class="ct">📈 Evolución Mensual</div><div class="cc"><canvas id="ch-ev"></canvas></div></div><div class="cw"><div class="ct">🥧 Por Producto</div><div class="cc"><canvas id="ch-do"></canvas></div></div></div>
       <div class="cg2"><div class="cw"><div class="ct">📊 Top 8 Productos</div><div class="cc" style="height:250px"><canvas id="ch-bar"></canvas></div></div><div class="cw"><div class="ct">📅 Por Día de Semana</div><div class="cc" style="height:250px"><canvas id="ch-day"></canvas></div></div></div>
@@ -905,7 +989,15 @@ tr:last-child td{border-bottom:none}
         <div class="full"><label class="fl">Total ($)</label><input type="number" class="fc2 fro" id="nv-total" readonly></div>
         <div class="full"><label class="fl">Cliente</label><input type="text" class="fc2" id="nv-cli" list="dl-cli" placeholder="Nombre del cliente"><datalist id="dl-cli"></datalist></div>
         <div><label class="fl">Medio de Pago</label><select class="fc2" id="nv-med"><option>Transferencia</option><option>Efectivo</option><option>Depósito</option><option>Crédito 15 días</option><option>Pendiente</option><option>POS</option><option>Debe</option><option>Otro</option></select></div>
-        <div><label class="fl">IVA ($)</label><input type="number" class="fc2" id="nv-iva" value="0"></div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label class="fl">IVA (12%)</label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
+            <input type="checkbox" id="nv-iva-chk" onchange="nvCalc()" style="width:18px;height:18px;accent-color:var(--vd);cursor:pointer">
+            <span style="font-size:13px;color:var(--go)">Aplica IVA 12%</span>
+          </label>
+          <input type="number" class="fc2 fro" id="nv-iva" value="0" readonly placeholder="Se calcula automático">
+        </div>
+        <div><label class="fl">Total con IVA ($)</label><input type="number" class="fc2 fro" id="nv-total-iva" readonly style="font-weight:700;color:var(--bl)"></div>
         <div class="full"><label class="fl">Observaciones</label><textarea class="fc2" id="nv-obs" rows="2"></textarea></div>
       </div>
       <div class="fa"><button class="btn bs2" onclick="nvClear()">Limpiar</button><button class="btn bp" onclick="nvSave()">✓ Registrar Venta</button></div>
@@ -916,13 +1008,24 @@ tr:last-child td{border-bottom:none}
     <div class="ph"><div><h1>Historial de Ventas</h1><p id="hv-cnt">—</p></div><div style="display:flex;gap:8px"><button class="bx" onclick="exportCSV()">⬇ CSV</button><button class="bx" onclick="exportXLS()">⬇ Excel</button></div></div>
     <div class="pb">
       <div class="fb"><div class="fg"><label>Buscar</label><input type="text" id="hv-q" placeholder="Producto, cliente, factura..." style="min-width:200px" oninput="hvFilter()"></div><div class="fg"><label>Desde</label><input type="date" id="hv-d" onchange="hvFilter()"></div><div class="fg"><label>Hasta</label><input type="date" id="hv-h" onchange="hvFilter()"></div><div class="fg"><label>Producto</label><select id="hv-p" onchange="hvFilter()" style="min-width:150px"><option value="">Todos</option></select></div><button class="br" onclick="hvReset()">✕ Limpiar</button></div>
-      <div class="panel"><div class="tw tsc"><table><thead><tr><th>Fecha</th><th>Factura</th><th>Producto</th><th>Cliente</th><th>Cant.</th><th>Importe ($)</th><th>Total ($)</th><th>Medio</th><th></th></tr></thead><tbody id="tb-hv"></tbody></table></div></div>
+      <div class="panel"><div class="tw tsc"><table><thead><tr><th>Fecha</th><th>Factura</th><th>Producto</th><th>Cliente</th><th>Cant.</th><th>Sin IVA ($)</th><th>IVA ($)</th><th>Con IVA ($)</th><th>Medio</th><th></th></tr></thead><tbody id="tb-hv"></tbody></table></div></div>
     </div>
    </div>
 
    <div class="page" id="page-ranking">
     <div class="ph"><div><h1>Ranking de Productos</h1><p>Análisis de desempeño comercial</p></div></div>
     <div class="pb">
+      <div class="fb" style="margin-bottom:16px">
+        <div class="fg"><label>Desde</label><input type="date" id="rk-d" onchange="renderRanking()"></div>
+        <div class="fg"><label>Hasta</label><input type="date" id="rk-h" onchange="renderRanking()"></div>
+        <div class="fg"><label>Ordenar por</label>
+          <select id="rk-ord" onchange="renderRanking()" style="min-width:140px">
+            <option value="importe">Facturación ($)</option>
+            <option value="cantidad">Unidades vendidas</option>
+            <option value="tx">Transacciones</option>
+          </select></div>
+        <button class="br" onclick="rkReset()">✕ Limpiar</button>
+      </div>
       <div class="cg2"><div class="panel" style="margin:0"><div class="pt"><span>⭐</span>Top Performers</div><div id="rk-top"></div></div><div class="panel" style="margin:0"><div class="pt"><span>⚠️</span>Bajo Movimiento</div><div id="rk-low"></div></div></div>
       <div style="height:16px"></div>
       <div class="panel"><div class="pt"><span>📋</span>Ranking Completo</div><div class="tw"><table><thead><tr><th>#</th><th>Producto</th><th>Unidades</th><th>Transacc.</th><th>Ticket Prom.</th><th>Facturación</th><th>% Total</th><th>Categoría</th></tr></thead><tbody id="tb-rk"></tbody></table></div></div>
@@ -960,7 +1063,7 @@ tr:last-child td{border-bottom:none}
    </div>
 
    <div class="page" id="page-productos">
-    <div class="ph"><div><h1>Productos</h1><p>Catálogo</p></div><button class="btn bp mo-only" onclick="openProd()">+ Nuevo</button></div>
+    <div class="ph"><div><h1>Productos</h1><p>Catálogo</p></div><button class="btn bp" onclick="openProd()">+ Nuevo Producto</button></div>
     <div class="pb"><div class="panel"><div class="tw"><table><thead><tr><th>Código</th><th>Descripción</th><th>Material</th><th>Costo</th><th>Stock</th><th>Facturado</th><th></th></tr></thead><tbody id="tb-pr"></tbody></table></div></div></div>
    </div>
 
