@@ -536,38 +536,8 @@ async function nvSave(){
 }
 
 
-function nvClear(){
-  ['nv-fac','nv-cant','nv-precio','nv-total','nv-total-iva','nv-cli','nv-obs','nv-nrotx'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
-  document.getElementById('nv-prod').value='';
-  document.getElementById('nv-iva').value='0';
-  const chk=document.getElementById('nv-iva-chk');if(chk)chk.checked=false;
-  document.getElementById('nv-f').value=today();
-}
-async function nvSave(){
-  const fecha=document.getElementById('nv-f').value,cod=document.getElementById('nv-prod').value,cant=parseFloat(document.getElementById('nv-cant').value),precio=parseFloat(document.getElementById('nv-precio').value);
-  if(!fecha||!cod||!cant||!precio){toast('Completá campos obligatorios (*)','err');return;}
-  const prod=S.find(s=>s.codigo===cod);
-  const base=parseFloat((cant*precio).toFixed(2));
-  const ivaChk=document.getElementById('nv-iva-chk')?.checked;
-  const ivaAmt=ivaChk?parseFloat((base*0.12).toFixed(2)):0;
-  const nv={fecha,factura:document.getElementById('nv-fac').value.trim()||'V-'+Date.now().toString().slice(-6),cod_prod:cod,producto:prod?.descripcion||cod,cantidad:cant,cliente:document.getElementById('nv-cli').value.trim()||'SIN CLIENTE',medio:document.getElementById('nv-med').value,importe:base,iva:ivaAmt,iva_aplica:ivaChk||false,total:base+ivaAmt,nro_transaccion:document.getElementById('nv-nrotx')?.value.trim()||'',obs:document.getElementById('nv-obs').value.trim(),registradoPor:SESSION.email};
-  showLoading('Guardando venta...');
-  const nid=await fsAdd('ventas',nv);V.push({_id:nid,...nv});
-  // update stock
-  const si=S.findIndex(s=>s.codigo===cod);
-  if(si>=0){S[si].vendido=(S[si].vendido||0)-cant;S[si].stock=(S[si].ingresado||0)+(S[si].vendido||0);await fsUpdate('stock',cod,{vendido:S[si].vendido,stock:S[si].stock});}
-  hideLoading();nvClear();renderDashV();renderRanking();renderStock();initSelects();toast('✓ Venta registrada');
-}
 
-// ── HISTORIAL ENTRADAS ─────────────────────────────────────────
-let heData=[];
-function heFilter(){
-  const q=document.getElementById('he-q').value.toLowerCase(),d=document.getElementById('he-d').value,h=document.getElementById('he-h').value,p=document.getElementById('he-p').value;
-  heData=[...E].filter(e=>{if(p&&e.producto!==p)return false;if(d&&e.fecha<d)return false;if(h&&e.fecha>h)return false;if(q&&!JSON.stringify(e).toLowerCase().includes(q))return false;return true;}).reverse();
-  document.getElementById('he-cnt').textContent=heData.length+' registros';
-  document.getElementById('tb-he').innerHTML=heData.map((e,i)=>`<tr><td>${e.fecha}</td><td style="font-family:monospace;font-size:11px">${e.remito||'—'}</td><td>${e.matricula||'—'}</td><td><strong>${e.producto}</strong></td><td style="text-align:right;font-weight:700;color:var(--bl)">${Math.round(e.cantidad).toLocaleString('es-UY')}</td><td>${e.ubicacion||'—'}</td><td style="font-size:11px;max-width:140px">${(e.obs||'').substring(0,40)}</td><td style="display:flex;gap:5px">${SESSION?.rol==='master'?`<button class="bed" onclick="window._openEE(${i})">✏️</button><button class="bdt" onclick="window._delE(${i})">🗑</button>`:''}</td></tr>`).join('');
-}
-function heReset(){['he-q','he-d','he-h'].forEach(id=>document.getElementById(id).value='');document.getElementById('he-p').value='';heFilter();}
+
 window._openEE=function(di){const e=heData[di];document.getElementById('ee-idx').value=di;document.getElementById('ee-f').value=e.fecha||'';document.getElementById('ee-rem').value=e.remito||'';document.getElementById('ee-mat').value=e.matricula||'';document.getElementById('ee-ubic').value=e.ubicacion||'';document.getElementById('ee-prod').value=e.producto||'';document.getElementById('ee-cant').value=e.cantidad||0;document.getElementById('ee-costo').value=e.costo||'';document.getElementById('ee-obs').value=e.obs||'';openM('m-ee');}
 async function eeSave(){
   const di=parseInt(document.getElementById('ee-idx').value);const e=heData[di];
