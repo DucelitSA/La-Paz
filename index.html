@@ -184,6 +184,9 @@ function boot(){
   document.getElementById('nv-f').value=today();
   document.getElementById('ni-f').value=today();
   msLbl('ms-med');
+  // Initialize multi-product lines
+  if(!document.querySelectorAll('#nv-lines .line-item').length) nvAddLine();
+  if(!document.querySelectorAll('#ni-lines .ni-line').length) niAddLine();
 }
 
 // ── SELECTS INIT ───────────────────────────────────────────────
@@ -392,17 +395,147 @@ async function evSave(){
 window._delV=async function(di){if(!confirm('¿Eliminar esta venta?'))return;const v=hvData[di];showLoading('Eliminando...');await fsDelete('ventas',v._id);V=V.filter(x=>x._id!==v._id);hideLoading();hvFilter();renderDashV();renderRanking();toast('Venta eliminada');}
 
 // ── NUEVA VENTA ────────────────────────────────────────────────
-function nvPrice(){const cod=document.getElementById('nv-prod').value;const s=S.find(x=>x.codigo===cod);if(s&&s.costo){document.getElementById('nv-precio').value=s.costo;nvCalc();}}
-function nvCalc(){
-  const c=parseFloat(document.getElementById('nv-cant').value)||0;
-  const p=parseFloat(document.getElementById('nv-precio').value)||0;
-  const base=c*p;
-  const ivaChk=document.getElementById('nv-iva-chk')?.checked;
-  const iva=ivaChk?parseFloat((base*0.12).toFixed(2)):0;
-  document.getElementById('nv-total').value=base.toFixed(2);
-  document.getElementById('nv-iva').value=iva.toFixed(2);
-  document.getElementById('nv-total-iva').value=(base+iva).toFixed(2);
+
+
+// ── NUEVA VENTA — MULTI-PRODUCT ───────────────────────────────
+let nvLines = [];
+let nvLineId = 0;
+
+function nvAddLine(prefill){
+  nvLineId++;
+  const id = nvLineId;
+  const opts = S.filter(s=>s.codigo).map(s=>`<option value="${s.codigo}">${s.descripcion}</option>`).join('');
+  const div = document.createElement('div');
+  div.className = 'line-item';
+  div.id = `nvl-${id}`;
+  div.innerHTML = `
+    <select onchange="nvLinePrice(${id})" style="grid-column:1">
+      <option value="">— Producto —</option>${opts}
+    </select>
+    <input type="number" placeholder="Cant." min="1" oninput="nvRecalc()" title="Cantidad">
+    <input type="number" placeholder="Precio $" min="0" oninput="nvRecalc()" title="Precio unitario">
+    <label class="line-iva" title="Aplica IVA 12%">
+      <input type="checkbox" onchange="nvRecalc()"> IVA 12%
+    </label>
+    <button class="line-del" onclick="nvRemoveLine(${id})" title="Eliminar">×</button>
+  `;
+  document.getElementById('nv-lines').appendChild(div);
+  if(prefill){
+    const els = div.querySelectorAll('select,input[type=number]');
+    if(prefill.cod) div.querySelector('select').value = prefill.cod;
+    if(prefill.cant) els[0].value = prefill.cant;
+    if(prefill.precio) els[1].value = prefill.precio;
+    if(prefill.iva) div.querySelector('input[type=checkbox]').checked = true;
+  }
+  nvRecalc();
 }
+
+function nvLinePrice(id){
+  const div = document.getElementById(`nvl-${id}`);
+  const cod = div.querySelector('select').value;
+  const s = S.find(x=>x.codigo===cod);
+  if(s&&s.costo){
+    const inputs = div.querySelectorAll('input[type=number]');
+    inputs[1].value = s.costo;
+  }
+  nvRecalc();
+}
+
+function nvRemoveLine(id){
+  const el = document.getElementById(`nvl-${id}`);
+  if(el) el.remove();
+  nvRecalc();
+  // Keep at least one line
+  if(!document.querySelectorAll('#nv-lines .line-item').length) nvAddLine();
+}
+
+function nvRecalc(){
+  let base=0, ivaTotal=0;
+  document.querySelectorAll('#nv-lines .line-item').forEach(div=>{
+    const sel = div.querySelector('select').value;
+    const inputs = div.querySelectorAll('input[type=number]');
+    const cant = parseFloat(inputs[0].value)||0;
+    const precio = parseFloat(inputs[1].value)||0;
+    const ivaChk = div.querySelector('input[type=checkbox]').checked;
+    const lineBase = cant * precio;
+    const lineIva = ivaChk ? lineBase * 0.12 : 0;
+    base += lineBase;
+    ivaTotal += lineIva;
+  });
+  const total = base + ivaTotal;
+  document.getElementById('nv-sum-base').textContent  = '$' + Math.round(base).toLocaleString('es-UY');
+  document.getElementById('nv-sum-iva').textContent   = '$' + Math.round(ivaTotal).toLocaleString('es-UY');
+  document.getElementById('nv-sum-total').textContent = '$' + Math.round(total).toLocaleString('es-UY');
+}
+
+function nvCalc(){ nvRecalc(); }
+function nvPrice(){}
+
+function nvClear(){
+  document.getElementById('nv-lines').innerHTML = '';
+  ['nv-fac','nv-cli','nv-obs','nv-nrotx'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('nv-f').value = today();
+  document.getElementById('nv-sum-base').textContent = '$0';
+  document.getElementById('nv-sum-iva').textContent = '$0';
+  document.getElementById('nv-sum-total').textContent = '$0';
+  nvAddLine(); // start with one empty line
+}
+
+async function nvSave(){
+  const fecha   = document.getElementById('nv-f').value;
+  const factura = document.getElementById('nv-fac').value.trim();
+  const cliente = document.getElementById('nv-cli').value.trim() || 'SIN CLIENTE';
+  const medio   = document.getElementById('nv-med').value;
+  const nrotx   = document.getElementById('nv-nrotx').value.trim();
+  const obs     = document.getElementById('nv-obs').value.trim();
+  if(!fecha){toast('La fecha es obligatoria','err');return;}
+
+  const lines = [];
+  let hasProduct = false;
+  document.querySelectorAll('#nv-lines .line-item').forEach(div=>{
+    const cod = div.querySelector('select').value;
+    const inputs = div.querySelectorAll('input[type=number]');
+    const cant = parseFloat(inputs[0].value)||0;
+    const precio = parseFloat(inputs[1].value)||0;
+    const ivaChk = div.querySelector('input[type=checkbox]').checked;
+    if(cod && cant && precio){
+      hasProduct = true;
+      const prod = S.find(s=>s.codigo===cod);
+      const base = parseFloat((cant*precio).toFixed(2));
+      const iva  = ivaChk ? parseFloat((base*0.12).toFixed(2)) : 0;
+      lines.push({cod, prod:prod?.descripcion||cod, cant, precio, base, iva, total:base+iva, ivaChk});
+    }
+  });
+
+  if(!hasProduct){toast('Agregá al menos un producto con cantidad y precio','err');return;}
+
+  showLoading('Guardando ventas...');
+  const baseFactura = factura || 'V-' + Date.now().toString().slice(-6);
+
+  for(const ln of lines){
+    const nv = {
+      fecha, factura: baseFactura, cod_prod: ln.cod, producto: ln.prod,
+      cantidad: ln.cant, cliente, medio, importe: ln.base,
+      iva: ln.iva, iva_aplica: ln.ivaChk, total: ln.total,
+      nro_transaccion: nrotx, obs, registradoPor: SESSION.email
+    };
+    const nid = await fsAdd('ventas', nv);
+    V.push({_id: nid, ...nv});
+    // update stock
+    const si = S.findIndex(s=>s.codigo===ln.cod);
+    if(si>=0){
+      S[si].vendido = (S[si].vendido||0) - ln.cant;
+      S[si].stock   = (S[si].ingresado||0) + (S[si].vendido||0);
+      await fsUpdate('stock', ln.cod, {vendido: S[si].vendido, stock: S[si].stock});
+    }
+  }
+  hideLoading();
+  nvClear();
+  renderDashV(); renderRanking(); renderStock(); initSelects();
+  toast(`✓ ${lines.length} producto(s) registrado(s) — Factura ${baseFactura}`);
+}
+
+
 function nvClear(){
   ['nv-fac','nv-cant','nv-precio','nv-total','nv-total-iva','nv-cli','nv-obs','nv-nrotx'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
   document.getElementById('nv-prod').value='';
@@ -449,18 +582,97 @@ async function eeSave(){
 window._delE=async function(di){if(!confirm('¿Eliminar este ingreso?'))return;const e=heData[di];showLoading('Eliminando...');await fsDelete('entradas',e._id);E=E.filter(x=>x._id!==e._id);hideLoading();heFilter();renderStock();toast('Ingreso eliminado');}
 
 // ── NUEVA ENTRADA ──────────────────────────────────────────────
-function niClear(){['ni-rem','ni-mat','ni-ubic','ni-cant','ni-costo','ni-obs'].forEach(id=>document.getElementById(id).value='');document.getElementById('ni-prod').value='';document.getElementById('ni-f').value=today();}
-async function niSave(){
-  const fecha=document.getElementById('ni-f').value,cod=document.getElementById('ni-prod').value,cant=parseFloat(document.getElementById('ni-cant').value);
-  if(!fecha||!cod||!cant){toast('Completá campos obligatorios (*)','err');return;}
-  const prod=S.find(s=>s.codigo===cod);
-  const ne={fecha,remito:document.getElementById('ni-rem').value.trim(),matricula:document.getElementById('ni-mat').value.trim(),cod_prod:cod,producto:prod?.descripcion||cod,cantidad:cant,ubicacion:document.getElementById('ni-ubic').value.trim(),costo:parseFloat(document.getElementById('ni-costo').value)||0,obs:document.getElementById('ni-obs').value.trim(),registradoPor:SESSION.email};
-  showLoading('Guardando ingreso...');
-  const nid=await fsAdd('entradas',ne);E.push({_id:nid,...ne});
-  const si=S.findIndex(s=>s.codigo===cod);
-  if(si>=0){S[si].ingresado=(S[si].ingresado||0)+cant;S[si].stock=(S[si].ingresado||0)+(S[si].vendido||0);await fsUpdate('stock',cod,{ingresado:S[si].ingresado,stock:S[si].stock});}
-  hideLoading();niClear();renderDashI();renderStock();initSelects();toast('✓ Ingreso registrado');
+
+
+// ── NUEVA ENTRADA — MULTI-PRODUCT ─────────────────────────────
+let niLineId = 0;
+
+function niAddLine(){
+  niLineId++;
+  const id = niLineId;
+  const opts = S.filter(s=>s.codigo).map(s=>`<option value="${s.codigo}">${s.descripcion}</option>`).join('');
+  const div = document.createElement('div');
+  div.className = 'ni-line';
+  div.id = `nil-${id}`;
+  div.innerHTML = `
+    <select style="grid-column:1">
+      <option value="">— Producto —</option>${opts}
+    </select>
+    <input type="number" placeholder="Cantidad" min="1" oninput="niRecalc()" title="Cantidad">
+    <input type="number" placeholder="Costo $" min="0" title="Costo unitario">
+    <button class="line-del" onclick="niRemoveLine(${id})" title="Eliminar">×</button>
+  `;
+  document.getElementById('ni-lines').appendChild(div);
+  niRecalc();
 }
+
+function niRemoveLine(id){
+  const el = document.getElementById(`nil-${id}`);
+  if(el) el.remove();
+  niRecalc();
+  if(!document.querySelectorAll('#ni-lines .ni-line').length) niAddLine();
+}
+
+function niRecalc(){
+  let total = 0;
+  document.querySelectorAll('#ni-lines .ni-line').forEach(div=>{
+    const inputs = div.querySelectorAll('input[type=number]');
+    total += parseFloat(inputs[0].value)||0;
+  });
+  const el = document.getElementById('ni-sum-uds');
+  if(el) el.textContent = Math.round(total).toLocaleString('es-UY');
+}
+
+function niClear(){
+  document.getElementById('ni-lines').innerHTML = '';
+  ['ni-rem','ni-mat','ni-ubic','ni-obs'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});
+  document.getElementById('ni-f').value = today();
+  const el = document.getElementById('ni-sum-uds'); if(el) el.textContent='0';
+  niAddLine();
+}
+
+async function niSave(){
+  const fecha = document.getElementById('ni-f').value;
+  const remito = document.getElementById('ni-rem').value.trim();
+  const mat    = document.getElementById('ni-mat').value.trim();
+  const ubic   = document.getElementById('ni-ubic').value.trim();
+  const obs    = document.getElementById('ni-obs').value.trim();
+  if(!fecha){toast('La fecha es obligatoria','err');return;}
+
+  const lines = [];
+  document.querySelectorAll('#ni-lines .ni-line').forEach(div=>{
+    const cod = div.querySelector('select').value;
+    const inputs = div.querySelectorAll('input[type=number]');
+    const cant  = parseFloat(inputs[0].value)||0;
+    const costo = parseFloat(inputs[1].value)||0;
+    if(cod && cant) lines.push({cod, cant, costo});
+  });
+
+  if(!lines.length){toast('Agregá al menos un producto con cantidad','err');return;}
+
+  showLoading('Guardando ingresos...');
+  for(const ln of lines){
+    const prod = S.find(s=>s.codigo===ln.cod);
+    const ne = {
+      fecha, remito, matricula: mat, cod_prod: ln.cod,
+      producto: prod?.descripcion||ln.cod, cantidad: ln.cant,
+      ubicacion: ubic, costo: ln.costo, obs, registradoPor: SESSION.email
+    };
+    const nid = await fsAdd('entradas', ne);
+    E.push({_id: nid, ...ne});
+    const si = S.findIndex(s=>s.codigo===ln.cod);
+    if(si>=0){
+      S[si].ingresado = (S[si].ingresado||0) + ln.cant;
+      S[si].stock     = (S[si].ingresado||0) + (S[si].vendido||0);
+      await fsUpdate('stock', ln.cod, {ingresado: S[si].ingresado, stock: S[si].stock});
+    }
+  }
+  hideLoading();
+  niClear();
+  renderDashI(); renderStock(); initSelects();
+  toast(`✓ ${lines.length} producto(s) ingresado(s) — Remito ${remito||'S/N'}`);
+}
+
 
 // ── RANKING ────────────────────────────────────────────────────
 function rkReset(){['rk-d','rk-h'].forEach(id=>{const e=document.getElementById(id);if(e)e.value='';});document.getElementById('rk-ord').value='importe';renderRanking();}
@@ -533,20 +745,24 @@ window._delUser=async function(uid){if(!confirm('¿Eliminar este usuario?'))retu
 function renderExpSum(){const el=document.getElementById('exp-sum');if(!el)return;const tf=V.reduce((s,v)=>s+v.importe,0);const clis=new Set(V.map(v=>v.cliente).filter(Boolean));const r=[V.map(v=>v.fecha).sort()[0],V.map(v=>v.fecha).sort().pop()];el.innerHTML='📋 <strong>'+V.length+'</strong> ventas · 📥 <strong>'+E.length+'</strong> ingresos · 💰 <strong>'+$f(tf)+'</strong> facturado<br>📅 <strong>'+r[0]+' → '+r[1]+'</strong> · 👤 <strong>'+clis.size+'</strong> clientes · 📦 <strong>'+S.filter(s=>s.codigo).length+'</strong> productos<br><small style="color:var(--gt)">☁️ Datos guardados en Firebase · Accesible desde cualquier dispositivo</small>';}
 function dlFile(n,t,c){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([c],{type:t}));a.download=n;a.click();}
 function exportCSV(){
-  const d=getFV();
+  // Use hvData if on historial page (filtered), else getFV() from dashboard
+  const onHistorial = document.getElementById('page-hist-v')?.classList.contains('active');
+  const d = onHistorial && hvData.length ? hvData : getFV();
   const fmt=n=>Math.round(n);
   const h=['Fecha','Factura','Producto','Cliente','Cantidad','Sin IVA','IVA','Con IVA','Medio','N° Transaccion','Obs'];
   const rows=d.map(v=>[v.fecha,v.factura||'',v.producto,v.cliente||'SIN CLIENTE',Math.round(v.cantidad),fmt(v.importe),fmt(v.iva||0),fmt(v.total||v.importe),v.medio||'',v.nro_transaccion||'',v.obs||'']);
   dlFile('LaPaz_Ventas.csv','text/csv',[h,...rows].map(r=>r.map(c=>'"'+(c||'').toString().replace(/"/g,'""')+'"').join(',')).join('\n'));
-  toast('CSV descargado');
+  toast(`CSV descargado (${d.length} registros)`);
 }
 function exportEntradasCSV(){const h=['Fecha','Remito','Matricula','Producto','Cantidad','Ubicacion','Costo','Obs'];dlFile('LaPaz_Ingresos.csv','text/csv',[h,...E.map(e=>[e.fecha,e.remito,e.matricula,e.producto,e.cantidad,e.ubicacion,e.costo,e.obs])].map(r=>r.map(c=>'"'+(c||'').toString().replace(/"/g,'""')+'"').join(',')).join('\n'));toast('CSV Ingresos descargado');}
 function exportXLS(){
-  const d=getFV();
+  const onHistorial = document.getElementById('page-hist-v')?.classList.contains('active');
+  const d = onHistorial && hvData.length ? hvData : getFV();
   const fmt=n=>Math.round(n).toString();
   let t='Fecha\tFactura\tProducto\tCliente\tCantidad\tSin IVA\tIVA\tCon IVA\tMedio\tN° Transaccion\tObs\n';
   t+=d.map(v=>[v.fecha,v.factura||'',v.producto,v.cliente||'SIN CLIENTE',Math.round(v.cantidad),fmt(v.importe),fmt(v.iva||0),fmt(v.total||v.importe),v.medio||'',v.nro_transaccion||'',v.obs||''].join('\t')).join('\n');
-  dlFile('LaPaz_Ventas.xls','application/vnd.ms-excel',t);toast('Excel descargado');
+  dlFile('LaPaz_Ventas.xls','application/vnd.ms-excel',t);
+  toast(`Excel descargado (${d.length} registros)`);
 }
 function exportJSON(){dlFile('LaPaz_DB.json','application/json',JSON.stringify({ventas:V,entradas:E,stock:S,exportado:new Date().toISOString()},null,2));toast('JSON descargado');}
 
@@ -629,7 +845,7 @@ function getIFilters(){
   if(fp)p.push(fp.substring(0,22));
   return p.join(' | ');
 }
-window.toggleSB=toggleSB;window.closeSB=closeSB;window.printDash=printDash;window.rkReset=rkReset;
+window.toggleSB=toggleSB;window.closeSB=closeSB;window.printDash=printDash;window.rkReset=rkReset;window.nvAddLine=nvAddLine;window.nvRemoveLine=nvRemoveLine;window.nvLinePrice=nvLinePrice;window.nvRecalc=nvRecalc;window.niAddLine=niAddLine;window.niRemoveLine=niRemoveLine;window.niRecalc=niRecalc;
 
 </script>
 <style>
@@ -857,6 +1073,28 @@ tr:last-child td{border-bottom:none}
 .print-hdr{display:none;text-align:center;margin-bottom:14px;padding-bottom:10px;border-bottom:2px solid #1B5E20}
 .print-hdr h2{color:#1B5E20;font-size:15pt;margin-bottom:3px}
 .print-hdr p{color:#555;font-size:10pt}
+
+/* LINE ITEMS */
+.line-item{display:grid;grid-template-columns:2fr 80px 110px auto 26px;gap:8px;
+  align-items:center;padding:10px 14px;background:var(--gg);border-radius:10px;margin-bottom:8px}
+.line-item select,.line-item input{padding:7px 10px;border:1.5px solid var(--gb);
+  border-radius:7px;font-size:13px;outline:none;background:white;width:100%}
+.line-item select:focus,.line-item input:focus{border-color:var(--vl)}
+.line-iva{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--gt);white-space:nowrap}
+.line-iva input[type=checkbox]{accent-color:var(--vd);width:15px;height:15px;cursor:pointer}
+.line-del{width:26px;height:26px;background:var(--rs);color:var(--rd);border:none;
+  border-radius:6px;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.line-del:hover{background:var(--rd);color:white}
+.ni-line{display:grid;grid-template-columns:2fr 90px 110px 26px;gap:8px;
+  align-items:center;padding:10px 14px;background:var(--gg);border-radius:10px;margin-bottom:8px}
+.ni-line select,.ni-line input{padding:7px 10px;border:1.5px solid var(--gb);
+  border-radius:7px;font-size:13px;outline:none;background:white;width:100%}
+.ni-line select:focus,.ni-line input:focus{border-color:var(--vl)}
+@media(max-width:768px){
+  .line-item{grid-template-columns:1fr 1fr;gap:6px}
+  .line-del{grid-column:2;justify-self:end}
+  .ni-line{grid-template-columns:1fr 1fr}
+}
 </style>
 </head>
 <body>
@@ -1001,31 +1239,62 @@ tr:last-child td{border-bottom:none}
    </div>
 
    <div class="page" id="page-nueva-venta">
-    <div class="ph"><div><h1>Registrar Venta</h1><p>Nueva entrada en el historial</p></div></div>
-    <div class="pb"><div class="panel" style="max-width:600px"><div class="pt"><span>🧾</span>Datos de la Venta</div>
-      <div class="fg2">
-        <div><label class="fl">Fecha *</label><input type="date" class="fc2" id="nv-f"></div>
-        <div><label class="fl">N° Factura</label><input type="text" class="fc2" id="nv-fac" placeholder="Ej: A-123"></div>
-        <div class="full"><label class="fl">Producto *</label><select class="fc2" id="nv-prod" onchange="nvPrice()"><option value="">— Seleccionar —</option></select></div>
-        <div><label class="fl">Cantidad *</label><input type="number" class="fc2" id="nv-cant" min="1" oninput="nvCalc()"></div>
-        <div><label class="fl">Precio Unitario ($) *</label><input type="number" class="fc2" id="nv-precio" oninput="nvCalc()"></div>
-        <div class="full"><label class="fl">Total ($)</label><input type="number" class="fc2 fro" id="nv-total" readonly></div>
-        <div class="full"><label class="fl">Cliente</label><input type="text" class="fc2" id="nv-cli" list="dl-cli" placeholder="Nombre del cliente"><datalist id="dl-cli"></datalist></div>
-        <div><label class="fl">Medio de Pago</label><select class="fc2" id="nv-med"><option>Transferencia</option><option>Efectivo</option><option>Depósito</option><option>Crédito 15 días</option><option>Pendiente</option><option>POS</option><option>Debe</option><option>Otro</option></select></div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          <label class="fl">IVA (12%)</label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px">
-            <input type="checkbox" id="nv-iva-chk" onchange="nvCalc()" style="width:18px;height:18px;accent-color:var(--vd);cursor:pointer">
-            <span style="font-size:13px;color:var(--go)">Aplica IVA 12%</span>
-          </label>
-          <input type="number" class="fc2 fro" id="nv-iva" value="0" readonly placeholder="Se calcula automático">
+    <div class="ph"><div><h1>Registrar Venta</h1><p>Podés agregar varios productos por factura</p></div></div>
+    <div class="pb">
+      <!-- Datos generales de la factura -->
+      <div class="panel" style="max-width:760px">
+        <div class="pt"><span>🧾</span>Datos Generales de la Factura</div>
+        <div class="fg2">
+          <div><label class="fl">Fecha *</label><input type="date" class="fc2" id="nv-f"></div>
+          <div><label class="fl">N° Factura</label><input type="text" class="fc2" id="nv-fac" placeholder="Ej: A-123"></div>
+          <div class="full"><label class="fl">Cliente</label>
+            <input type="text" class="fc2" id="nv-cli" list="dl-cli" placeholder="Nombre del cliente">
+            <datalist id="dl-cli"></datalist></div>
+          <div><label class="fl">Medio de Pago</label>
+            <select class="fc2" id="nv-med">
+              <option>Transferencia</option><option>Efectivo</option><option>Depósito</option>
+              <option>Crédito 15 días</option><option>Pendiente</option><option>POS</option>
+              <option>Mercado Libre</option><option>Efectivo y Transferencia</option>
+              <option>POS y Efectivo</option><option>Transferencia y Depósito</option>
+              <option>Valorizable</option><option>Devolución</option><option>Donación</option>
+              <option>Pagó</option><option>Sin especificar</option>
+            </select></div>
+          <div><label class="fl">N° Transacción / Referencia</label>
+            <input type="text" class="fc2" id="nv-nrotx" placeholder="N° depósito, ref. transferencia..."></div>
+          <div class="full"><label class="fl">Observaciones</label>
+            <textarea class="fc2" id="nv-obs" rows="2"></textarea></div>
         </div>
-        <div><label class="fl">Total con IVA ($)</label><input type="number" class="fc2 fro" id="nv-total-iva" readonly style="font-weight:700;color:var(--bl)"></div>
-        <div class="full"><label class="fl">N° Transacción / Referencia</label><input type="text" class="fc2" id="nv-nrotx" placeholder="N° depósito, ref. transferencia, cheque..."></div>
-        <div class="full"><label class="fl">Observaciones</label><textarea class="fc2" id="nv-obs" rows="2"></textarea></div>
       </div>
-      <div class="fa"><button class="btn bs2" onclick="nvClear()">Limpiar</button><button class="btn bp" onclick="nvSave()">✓ Registrar Venta</button></div>
-    </div></div>
+      <!-- Líneas de productos -->
+      <div class="panel" style="max-width:760px">
+        <div class="pt" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:7px"><span>📦</span>Productos de la Factura</span>
+          <button class="btn bs2 bsm" onclick="nvAddLine()">+ Agregar producto</button>
+        </div>
+        <div id="nv-lines"><!-- JS inserts rows here --></div>
+        <!-- Totales -->
+        <div style="margin-top:16px;padding-top:14px;border-top:2px solid var(--vs)">
+          <div style="display:flex;justify-content:flex-end;gap:32px;flex-wrap:wrap">
+            <div style="text-align:right">
+              <div style="font-size:11px;color:var(--gt);font-weight:600;text-transform:uppercase;letter-spacing:.4px">Subtotal sin IVA</div>
+              <div style="font-size:20px;font-weight:700;color:var(--vd);font-family:'DM Mono',monospace" id="nv-sum-base">$0</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;color:var(--gt);font-weight:600;text-transform:uppercase;letter-spacing:.4px">IVA Total</div>
+              <div style="font-size:20px;font-weight:700;color:var(--am);font-family:'DM Mono',monospace" id="nv-sum-iva">$0</div>
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:11px;color:var(--gt);font-weight:600;text-transform:uppercase;letter-spacing:.4px">Total con IVA</div>
+              <div style="font-size:24px;font-weight:700;color:var(--bl);font-family:'DM Mono',monospace" id="nv-sum-total">$0</div>
+            </div>
+          </div>
+        </div>
+        <div class="fa">
+          <button class="btn bs2" onclick="nvClear()">Limpiar todo</button>
+          <button class="btn bp" onclick="nvSave()">✓ Registrar Factura</button>
+        </div>
+      </div>
+    </div>
    </div>
 
    <div class="page" id="page-hist-v">
@@ -1066,20 +1335,37 @@ tr:last-child td{border-bottom:none}
    </div>
 
    <div class="page" id="page-nueva-entrada">
-    <div class="ph"><div><h1>Ingresar Mercadería</h1><p>Registrar entrada de stock</p></div></div>
-    <div class="pb"><div class="panel" style="max-width:600px"><div class="pt"><span>📥</span>Datos del Ingreso</div>
-      <div class="fg2">
-        <div><label class="fl">Fecha *</label><input type="date" class="fc2" id="ni-f"></div>
-        <div><label class="fl">N° Remito</label><input type="text" class="fc2" id="ni-rem" placeholder="Ej: 718316"></div>
-        <div><label class="fl">Matrícula / Proveedor</label><input type="text" class="fc2" id="ni-mat"></div>
-        <div><label class="fl">Ubicación</label><input type="text" class="fc2" id="ni-ubic"></div>
-        <div class="full"><label class="fl">Producto *</label><select class="fc2" id="ni-prod"><option value="">— Seleccionar —</option></select></div>
-        <div><label class="fl">Cantidad *</label><input type="number" class="fc2" id="ni-cant" min="1"></div>
-        <div><label class="fl">Costo Unitario ($)</label><input type="number" class="fc2" id="ni-costo"></div>
-        <div class="full"><label class="fl">Observaciones</label><textarea class="fc2" id="ni-obs" rows="2"></textarea></div>
+    <div class="ph"><div><h1>Ingresar Mercadería</h1><p>Podés agregar varios productos por remito</p></div></div>
+    <div class="pb">
+      <div class="panel" style="max-width:760px">
+        <div class="pt"><span>📥</span>Datos del Remito</div>
+        <div class="fg2">
+          <div><label class="fl">Fecha *</label><input type="date" class="fc2" id="ni-f"></div>
+          <div><label class="fl">N° Remito</label><input type="text" class="fc2" id="ni-rem" placeholder="Ej: 718316"></div>
+          <div><label class="fl">Matrícula / Proveedor</label><input type="text" class="fc2" id="ni-mat" placeholder="Ej: STP8133"></div>
+          <div><label class="fl">Ubicación en Almacén</label><input type="text" class="fc2" id="ni-ubic" placeholder="Sector / pasillo"></div>
+          <div class="full"><label class="fl">Observaciones del Remito</label>
+            <textarea class="fc2" id="ni-obs" rows="2"></textarea></div>
+        </div>
       </div>
-      <div class="fa"><button class="btn bs2" onclick="niClear()">Limpiar</button><button class="btn bp" onclick="niSave()">✓ Registrar Ingreso</button></div>
-    </div></div>
+      <div class="panel" style="max-width:760px">
+        <div class="pt" style="justify-content:space-between">
+          <span style="display:flex;align-items:center;gap:7px"><span>📦</span>Productos del Remito</span>
+          <button class="btn bs2 bsm" onclick="niAddLine()">+ Agregar producto</button>
+        </div>
+        <div id="ni-lines"><!-- JS inserts rows here --></div>
+        <div style="margin-top:14px;padding-top:12px;border-top:2px solid var(--vs);display:flex;justify-content:flex-end">
+          <div style="text-align:right">
+            <div style="font-size:11px;color:var(--gt);font-weight:600;text-transform:uppercase">Total unidades</div>
+            <div style="font-size:22px;font-weight:700;color:var(--bl);font-family:'DM Mono',monospace" id="ni-sum-uds">0</div>
+          </div>
+        </div>
+        <div class="fa">
+          <button class="btn bs2" onclick="niClear()">Limpiar todo</button>
+          <button class="btn bp" onclick="niSave()">✓ Registrar Remito</button>
+        </div>
+      </div>
+    </div>
    </div>
 
    <div class="page" id="page-hist-e">
