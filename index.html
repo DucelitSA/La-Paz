@@ -390,7 +390,7 @@ tr:hover td{background:var(--vx)}
           <button class="btn bs2 bsm" id="nv-add-btn">+ Agregar producto</button>
         </div>
         <div class="lines-wrap">
-          <div class="line-hdr nv-hdr"><span>Producto</span><span>Cant.</span><span>Precio $</span><span>IVA 12%</span><span></span></div>
+          <div class="line-hdr nv-hdr"><span>Producto</span><span>Cant.</span><span>Precio $</span><span>IVA 22%</span><span></span></div>
           <div id="nv-lines"></div>
           <button class="add-line-btn" id="nv-add-btn2">+ Agregar otro producto</button>
         </div>
@@ -555,10 +555,10 @@ tr:hover td{background:var(--vx)}
       <div><label class="fl">Precio Unit. ($) *</label><input type="number" class="fc2" id="ev-precio" oninput="evCalc()"></div>
       <div><label class="fl">Sin IVA ($)</label><input type="number" class="fc2 fro" id="ev-base" readonly></div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <label class="fl">IVA 12%</label>
+        <label class="fl">IVA 22%</label>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:6px">
           <input type="checkbox" id="ev-iva-chk" onchange="evCalc()" style="width:16px;height:16px;accent-color:var(--vd)">
-          <span style="font-size:13px">Aplica IVA 12%</span>
+          <span style="font-size:13px">Aplica IVA 22%</span>
         </label>
         <input type="number" class="fc2 fro" id="ev-iva" readonly>
       </div>
@@ -635,14 +635,14 @@ tr:hover td{background:var(--vx)}
 <div id="toast"></div>
 
 <script type="module">
-import { initializeApp }                              from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+import { initializeApp }                              from "https://www.gstatic.com/firebasejs/10.22.0/firebase-app.js";
 import { getAuth, signInWithEmailAndPassword,
          signOut, onAuthStateChanged,
-         createUserWithEmailAndPassword }             from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+         createUserWithEmailAndPassword }             from "https://www.gstatic.com/firebasejs/10.22.0/firebase-auth.js";
 import { getFirestore, collection, doc,
          getDocs, getDoc, setDoc, addDoc,
          updateDoc, deleteDoc, writeBatch, query,
-         limit }                                      from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+         limit }                                      from "https://www.gstatic.com/firebasejs/10.22.0/firebase-firestore.js";
 
 const firebaseConfig = {
   apiKey:            "AIzaSyBDesr-SREhi_gBi9eYL4y7zr80tmtSCh8",
@@ -953,7 +953,7 @@ function nvInitLines(){
 function nvAddLine(){document.getElementById('nv-lines').appendChild(nvMakeRow());nvRecalc();}
 function nvRecalc(){
   let base=0,ivaT=0;
-  document.querySelectorAll('#nv-lines .line-row').forEach(row=>{const c=parseFloat(row.querySelector('.nv-cant')?.value)||0;const p=parseFloat(row.querySelector('.nv-precio')?.value)||0;const iva=row.querySelector('.nv-iva')?.checked||false;const lb=c*p;base+=lb;ivaT+=iva?lb*0.12:0;});
+  document.querySelectorAll('#nv-lines .line-row').forEach(row=>{const c=parseFloat(row.querySelector('.nv-cant')?.value)||0;const p=parseFloat(row.querySelector('.nv-precio')?.value)||0;const iva=row.querySelector('.nv-iva')?.checked||false;const lb=c*p;base+=lb;ivaT+=iva?lb*0.22:0;});
   const t=base+ivaT;
   const tb=document.getElementById('nv-t-base');if(tb)tb.textContent=$f(base);
   const ti=document.getElementById('nv-t-iva');if(ti)ti.textContent=$f(ivaT);
@@ -974,7 +974,7 @@ async function nvSave(){
     const cant=parseFloat(row.querySelector('.nv-cant')?.value)||0;
     const precio=parseFloat(row.querySelector('.nv-precio')?.value)||0;
     const ivaChk=row.querySelector('.nv-iva')?.checked||false;
-    if(cod&&cant&&precio){const prod=S.find(s=>s.codigo===cod);const base=parseFloat((cant*precio).toFixed(2));const iva=ivaChk?parseFloat((base*0.12).toFixed(2)):0;lines.push({cod,prod:prod?.descripcion||cod,cant,base,iva,total:base+iva,ivaChk});}
+    if(cod&&cant&&precio){const prod=S.find(s=>s.codigo===cod);const base=parseFloat((cant*precio).toFixed(2));const iva=ivaChk?parseFloat((base*0.22).toFixed(2)):0;lines.push({cod,prod:prod?.descripcion||cod,cant,base,iva,total:base+iva,ivaChk});}
   });
   if(!lines.length){toast('Agregá al menos un producto con cantidad y precio','err');return;}
   showLoading('Guardando...');
@@ -1057,12 +1057,12 @@ window._ev=function(di){
   const ms=document.getElementById('ev-med');for(let o of ms.options){if(o.value===(v.medio||'').trim()){ms.value=o.value;break;}}
   openM('m-ev');
 };
-function evCalc(){const c=parseFloat(document.getElementById('ev-cant').value)||0;const p=parseFloat(document.getElementById('ev-precio').value)||0;const base=c*p;const ivaChk=document.getElementById('ev-iva-chk')?.checked;const iva=ivaChk?base*0.12:0;document.getElementById('ev-base').value=base.toFixed(2);document.getElementById('ev-iva').value=iva.toFixed(2);document.getElementById('ev-total').value=(base+iva).toFixed(2);}
+function evCalc(){const c=parseFloat(document.getElementById('ev-cant').value)||0;const p=parseFloat(document.getElementById('ev-precio').value)||0;const base=c*p;const ivaChk=document.getElementById('ev-iva-chk')?.checked;const iva=ivaChk?base*0.22:0;document.getElementById('ev-base').value=base.toFixed(2);document.getElementById('ev-iva').value=iva.toFixed(2);document.getElementById('ev-total').value=(base+iva).toFixed(2);}
 async function evSave(){
   const di=parseInt(document.getElementById('ev-idx').value);const v=hvData[di];
   const fecha=document.getElementById('ev-f').value,prod=document.getElementById('ev-prod').value.trim(),cant=parseFloat(document.getElementById('ev-cant').value),precio=parseFloat(document.getElementById('ev-precio').value);
   if(!fecha||!prod||!cant||!precio){toast('Completá campos obligatorios','err');return;}
-  const base=parseFloat((cant*precio).toFixed(2));const ivaChk=document.getElementById('ev-iva-chk')?.checked;const iva=ivaChk?parseFloat((base*0.12).toFixed(2)):0;
+  const base=parseFloat((cant*precio).toFixed(2));const ivaChk=document.getElementById('ev-iva-chk')?.checked;const iva=ivaChk?parseFloat((base*0.22).toFixed(2)):0;
   const upd={...v,fecha,factura:document.getElementById('ev-fac').value.trim(),producto:prod,cantidad:cant,importe:base,iva,iva_aplica:ivaChk||false,total:base+iva,cliente:document.getElementById('ev-cli').value.trim()||'SIN CLIENTE',medio:document.getElementById('ev-med').value,nro_transaccion:document.getElementById('ev-nrotx').value.trim(),obs:document.getElementById('ev-obs').value.trim()};
   showLoading('Guardando...');const {_id,...data}=upd;await fsUpdate('ventas',_id,data);const vi=V.findIndex(x=>x._id===_id);if(vi>=0)V[vi]=upd;
   hideLoading();closeM('m-ev');hvFilter();renderDashV();renderRanking();toast('✓ Venta actualizada');
