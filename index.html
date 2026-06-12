@@ -690,9 +690,19 @@ async function fsUpdate(col,id,data){await updateDoc(doc(db,col,id),data);}
 async function fsDelete(col,id){await deleteDoc(doc(db,col,id));}
 
 async function seedIfEmpty(){
-  showLoading('Verificando base...');
-  const snap=await getDocs(query(collection(db,'ventas'),limit(1)));
-  if(!snap.empty){hideLoading();return;}
+  showLoading('Verificando version...');
+  try{
+    const vsnap=await getDoc(doc(db,'config','dataVersion'));
+    if(vsnap.exists()&&vsnap.data().version==='v2788'){hideLoading();return;}
+  }catch(e){}
+  showLoading('Actualizando datos...');
+  const existingSnap=await getDocs(collection(db,'ventas'));
+  if(!existingSnap.empty){
+    const chunks=[];
+    for(let i=0;i<existingSnap.docs.length;i+=500)chunks.push(existingSnap.docs.slice(i,i+500));
+    for(const chunk of chunks){const b=writeBatch(db);chunk.forEach(d=>b.delete(d.ref));await b.commit();}
+    showLoading('Registros anteriores eliminados. Cargando nuevos...');
+  }
   const BS=400;
   for(let i=0;i<SEED_V.length;i+=BS){
     const b=writeBatch(db);SEED_V.slice(i,i+BS).forEach(v=>b.set(doc(collection(db,'ventas')),v));
@@ -703,6 +713,7 @@ async function seedIfEmpty(){
     await b.commit();showLoading(`Cargando ingresos... ${Math.min(i+BS,SEED_E.length)}/${SEED_E.length}`);
   }
   const b3=writeBatch(db);SEED_S.forEach(s=>b3.set(doc(db,'stock',s.codigo),s));await b3.commit();
+  await fsSet('config','dataVersion',{version:'v2788',updated:new Date().toISOString()});
   hideLoading();
 }
 
